@@ -13,8 +13,11 @@ services:
     command: sleep infinity
 
   pyspark:
-    image: jupyter/pyspark-notebook:spark-3.1.2
+    image: jupyter/pyspark-notebook:latest
+  # Specify kernel
     environment: 
       - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=somecomplicatedpassword#fdcs2#4
+      - JUPYTER_ALLOW_ORIGIN=*
     ports: 
       - 8889:8888
