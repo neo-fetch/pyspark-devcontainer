@@ -12,7 +12,7 @@
 # Is_available_not()
 # Book_title
 # Author
-from secrets import choice
+
 import time
 import pandas as pd
 from fuzzywuzzy import fuzz
@@ -69,7 +69,6 @@ class Books:
             student_db = pd.read_csv(
                 self.student_db
             )  # Format: [Student ID, Student Name, Student Class, Student Section, Student Roll No.]
-            
 
     def book_status(self):
         print("Welcome to the book status menu!")
