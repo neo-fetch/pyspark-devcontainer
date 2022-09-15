@@ -17,6 +17,10 @@ import time
 import pandas as pd
 from fuzzywuzzy import fuzz
 import os
+import re
+import time
+from tqdm import tqdm
+from tabulate import tabulate
 
 
 class Books:
@@ -51,24 +55,113 @@ class Books:
         book_db = pd.read_csv(
             self.book_db
         )  # Format: [Book Name, Author, Year, Book ID]
+        status_db = pd.read_csv(
+            self.status_db
+        )  # Format: [Book ID,Available Status,Issued Status]
         valid_book = False
         for bid in book_db["Book ID"]:
             if bid == book_id:
                 valid_book = True
                 break
+            # We also need to check if the book is available or not from the status_db
+            for bid, available, issued in zip(
+                status_db["Book ID"], status_db["Available Status"], status_db["Issued Status"]
+            ):
+                if bid == book_id:
+                    if available - issued == 0:
+                        print("The book is not available!")
+                        valid_book = False
+                        
         if not valid_book:
-            print("Invalid book ID! Returning to main menu...")
+            print("Invalid book ID/ Unavailable! Returning to main menu...")
             time.sleep(2)
             self.run()
         if action == "assign":
             # Check if the student id is valid if it follows the format: I000[0-9]{4}
-            # If it is, then check if the student has already borrowed 3 books
+            if re.match(r"I000[0-9]{4}", student_id):
+                # Check if the student id is valid
+                student_db = pd.read_csv(
+                    self.student_db
+                ) # Format: [Student ID, Student Name, Student Class, Student Section, Student Roll No.]
+                # If it is, then check if the student has already borrowed 3 books
+                valid_student = True
+                borrowed_books = 0
+                for sid, bid in zip(student_db["Student ID"], student_db["Book ID"]):
+                    if sid == student_id:
+                        borrowed_books += 1
+                        if borrowed_books >= 3:
+                            print("Student has already borrowed 3 books!")
+                            valid_student = False
+                            time.sleep(2)
+                            self.run()
+                        if bid == book_id:
+                            print("Student has already borrowed this book!")
+                            valid_student = False
+                            time.sleep(2)
+                            self.run()
+                # If we come this far, then the student has either:
+                # 1. Borrowed less than 3 books
+                # 2. Not already borrowed this book, removing any chance of a duplicate
+                
+                # Adding the book to the student's list of borrowed books as [Student ID, Book ID, Today's Date, 15 days from today's date]
+                if valid_student:
+                    # Add the book to the student's list of borrowed books
+                    student_db.loc[len(student_db.index)] = [student_id, book_id, time.strftime("%d/%m/%Y"), time.strftime("%d/%m/%Y", time.localtime(time.time() + 15 * 24 * 60 * 60))]
+                    # Update the status_db
+                    for i in range(len(status_db["Book ID"])):
+                        if status_db["Book ID"][i] == book_id:
+                            status_db["Issued Status"].loc[i] += 1
+                            
+                    # Save the changes
+                    student_db.to_csv(self.student_db, index=False)
+                    status_db.to_csv(self.status_db, index=False)
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print("Book assigned successfully!")
+                    print(tabulate(student_db, headers="keys", tablefmt="psql"))
+                    time.sleep(2)
+                    self.run()
+    
+                
+            else:
+                print("Invalid student ID! Please try again.")
+                time.sleep(2)
+                self.book_ops(book_id=book_id, action=action)
             # If not, then check if the book is available
             # If it is, then assign the book to the student and update the status in status_db
             # If not, then return an error message
-            student_db = pd.read_csv(
-                self.student_db
-            )  # Format: [Student ID, Student Name, Student Class, Student Section, Student Roll No.]
+        elif action == "return":
+            if re.match(r"I000[0-9]{4}", student_id):
+                # Check if the student id is valid
+                student_db = pd.read_csv(
+                    self.student_db
+                ) # Format: [Student ID, Student Name, Student Class, Student Section, Student Roll No.]
+                
+                # Scan the books issued by the student from the student_db
+                # If the book is found, then remove it from the student_db and update the status_db
+                # If not, then return an error message
+                
+                for student, b_id in zip(student_db["Student ID"], student_db["Book ID"]):
+                    if student == student_id and b_id == book_id:
+                        # Remove the book from the student_db
+                        student_db.drop(student_db.index[student_db["Student ID"] == student_id], inplace=True)
+                        # Update the status_db
+                        for i in range(len(status_db["Book ID"])):
+                            if status_db["Book ID"][i] == book_id:
+                                status_db["Issued Status"].loc[i] -= 1
+                        # Save the changes
+                        student_db.to_csv(self.student_db, index=False)
+                        status_db.to_csv(self.status_db, index=False)
+                        os.system("cls" if os.name == "nt" else "clear")
+                        print("Book returned successfully!")
+                        print(tabulate(student_db, headers="keys", tablefmt="psql"))
+                        time.sleep(2)
+                        self.run()
+                print("Student has not borrowed this book!")
+                time.sleep(2)
+                self.run()
+
+            
+
 
     def book_status(self):
         print("Welcome to the book status menu!")
@@ -85,11 +178,12 @@ class Books:
         # If there is, then return the book id
         # If not, then return None
 
-        for book, author, year, book_id in zip(
+        for book, author, year, book_id in tqdm(zip(
             book_db["Book Name"], book_db["Author"], book_db["Year"], book_db["Book ID"]
-        ):
+        ), total=len(book_db["Book Name"]), ascii=" ▖▘▝▗▚▞█"):
             ratio = fuzz.ratio(book.lower(), f"‘{book_title}’".lower())
             if ratio >= 80:
+                os.system("cls" if os.name == "nt" else "clear")
                 print(
                     f"We found a match for ‘{book_title}’ with {book} with an accuracy of {ratio}%."
                 )
@@ -97,6 +191,7 @@ class Books:
                 while choice != "y" and choice != "n":
                     choice = input("Invalid choice! Please try again: ").lower()
                 if choice == "y":
+                    os.system("cls" if os.name == "nt" else "clear")
                     return book, author, year, book_id
                 else:
                     continue
@@ -105,7 +200,7 @@ class Books:
         os.system("cls" if os.name == "nt" else "clear")
         print("We couldn't find a match for your book. Maybe check the spelling?")
         time.sleep(2)
-        return None
+        return None, None, None, None
 
     def run(self):
         print("Welcome to Library Operations!")
@@ -133,7 +228,7 @@ class Books:
                 if resume == "y":
                     print("Assigning book...")
                     time.sleep(2)
-                    self.book_ops()
+                    self.book_ops(book_id=book_id)
                 else:
                     print("Returning to main menu...")
                     time.sleep(2)

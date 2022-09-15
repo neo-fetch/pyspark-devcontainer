@@ -71,7 +71,7 @@ def init():
                 10,
                 0,
             ]  # Denoting 10 copies available and 0 copies issued
-        df_status.to_csv("status.csv", mode="a", header=False, index=False)
+        df_status.to_csv("statusdb.csv", mode="a", header=False, index=False)
 
     # Create a dataframe for the student issue history
     # [Student ID, Book ID, Issue Date, Return Date]
@@ -87,9 +87,9 @@ def init():
     while choice != "y" and choice != "n":
         choice = input("Invalid choice. Do you want to see the data? (y/n): ")
     if choice == "y":
-        print(tabulate(df_book, headers="keys", tablefmt="psql"))
-        print(tabulate(df_status, headers="keys", tablefmt="psql"))
-        print(tabulate(df_student, headers="keys", tablefmt="psql"))
+        print(tabulate(pd.read_csv('bookdb.csv'), headers="keys", tablefmt="psql"))
+        print(tabulate(pd.read_csv('statusdb.csv'), headers="keys", tablefmt="psql"))
+        print(tabulate(pd.read_csv('studentdb.csv'), headers="keys", tablefmt="psql"))
         choice = input("Continue to the main menu? (y/n): ")
         while choice != "y" and choice != "n":
             choice = input("Invalid choice. Continue to the main menu? (y/n): ")
@@ -167,8 +167,8 @@ if __name__ == "__main__":
             init()
 
         # Fake progress bar:
-        print("Loading the library data microservice")
-        for i in tqdm(range(100)):
+        
+        for i in tqdm(range(100), ascii=" ▖▘▝▗▚▞█", desc="Loading the library data microservice"):
             time.sleep(0.01)
         run()
     elif choice == "2":
