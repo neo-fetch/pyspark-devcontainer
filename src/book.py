@@ -1,7 +1,5 @@
-# import pyspark
-# from pyspark.sql import SparkSession
 #
-# TODO: Reimplement this using pyspark. For now, we will use pandas
+# TODO: Reimplement this using pyspark. For now, we will use pandas [x]
 #
 # ---------------------------------------------------------------------
 #
@@ -13,6 +11,8 @@
 # Book_title
 # Author
 
+import pyspark
+from pyspark.sql import SparkSession
 import time
 import pandas as pd
 from fuzzywuzzy import fuzz
@@ -38,6 +38,8 @@ class Books:
         self.run()
 
     def book_ops(self, book_id=None, student_id=None, action=None):
+        spark = SparkSession.builder.getOrCreate()  
+        
         print("Welcome to the book operations menu!")
         # If book_id is None, then we need to ask for the book id
         book_id = input("Enter the book ID: ") if book_id is None else book_id
@@ -52,25 +54,30 @@ class Books:
 
         # Check if the book id is valid
 
-        book_db = pd.read_csv(
-            self.book_db
-        )  # Format: [Book Name, Author, Year, Book ID]
-        status_db = pd.read_csv(
-            self.status_db
-        )  # Format: [Book ID,Available Status,Issued Status]
+        book_db = spark.read.csv(self.book_db, header=True) # Format: [Book Name, Author, Year, Book ID]
+        book_db = book_db.withColumn("Year", book_db["Year"].cast("int"))
+        status_db = spark.read.csv(self.status_db, header=True) # Format: [Book ID,Available Status,Issued Status]
+        status_db = status_db.withColumn("Available Status", status_db["Available Status"].cast("int"))
+        status_db = status_db.withColumn("Issued Status", status_db["Issued Status"].cast("int"))
+        
         valid_book = False
-        for bid in book_db["Book ID"]:
-            if bid == book_id:
+        for book in book_db.collect():
+            if book["Book ID"] == book_id:
                 valid_book = True
                 break
+        # for bid in book_db["Book ID"]:
+        #     if bid == book_id:
+        #         valid_book = True
+        #         break
             # We also need to check if the book is available or not from the status_db
-            for bid, available, issued in zip(
-                status_db["Book ID"], status_db["Available Status"], status_db["Issued Status"]
-            ):
-                if bid == book_id:
-                    if available - issued == 0:
-                        print("The book is not available!")
-                        valid_book = False
+        for status in status_db.collect():
+        # for bid, available, issued in zip(
+        #     status_db["Book ID"], status_db["Available Status"], status_db["Issued Status"]
+        # ):
+            if status["Book ID"] == book_id:
+                if status["Available Status"] - status["Issued Status"] == 0:
+                    print("The book is not available!")
+                    valid_book = False
                         
         if not valid_book:
             print("Invalid book ID/ Unavailable! Returning to main menu...")
@@ -80,21 +87,19 @@ class Books:
             # Check if the student id is valid if it follows the format: I000[0-9]{4}
             if re.match(r"I000[0-9]{4}", student_id):
                 # Check if the student id is valid
-                student_db = pd.read_csv(
-                    self.student_db
-                ) # Format: [Student ID, Student Name, Student Class, Student Section, Student Roll No.]
+                student_db = spark.read.csv(self.student_db, header=True) # Format: [Student ID, Book ID, Issue Date, Return Date]
                 # If it is, then check if the student has already borrowed 3 books
                 valid_student = True
                 borrowed_books = 0
-                for sid, bid in zip(student_db["Student ID"], student_db["Book ID"]):
-                    if sid == student_id:
+                for student in student_db.collect():
+                    if student["Student ID"] == student_id:
                         borrowed_books += 1
                         if borrowed_books >= 3:
                             print("Student has already borrowed 3 books!")
                             valid_student = False
                             time.sleep(2)
                             self.run()
-                        if bid == book_id:
+                        if student["Book ID"] == book_id:
                             print("Student has already borrowed this book!")
                             valid_student = False
                             time.sleep(2)
@@ -106,19 +111,33 @@ class Books:
                 # Adding the book to the student's list of borrowed books as [Student ID, Book ID, Today's Date, 15 days from today's date]
                 if valid_student:
                     # Add the book to the student's list of borrowed books
-                    student_db.loc[len(student_db.index)] = [student_id, book_id, time.strftime("%d/%m/%Y"), time.strftime("%d/%m/%Y", time.localtime(time.time() + 15 * 24 * 60 * 60))]
-                    # Update the status_db
-                    for i in range(len(status_db["Book ID"])):
-                        if status_db["Book ID"][i] == book_id:
-                            status_db["Issued Status"].loc[i] += 1
+                    issue_date = time.strftime("%d/%m/%Y")
+                    return_date = time.strftime("%d/%m/%Y", time.localtime(time.time() + 15 * 24 * 60 * 60))
+                    new_issue = spark.createDataFrame([[student_id, book_id, issue_date, return_date]], ["Student ID", "Book ID", "Issue Date", "Return Date"])
+                    student_db = student_db.union(new_issue)
+                    # student_db = student_db.append({"Student ID": student_id, "Book ID": book_id, "Issue Date": issue_date, "Return Date": return_date}, ignore_index=True)
+                    # spark.sql(f"INSERT INTO student_db VALUES ({student_id}, {book_id}, {issue_date}, {return_date})")
+                    # Update the status_db to reflect the book being issued
+                    status_db = status_db.withColumn("Issued Status", status_db["Issued Status"] + 1)\
+                        .where(status_db["Book ID"] == book_id)
+
+                    # spark.sql(f"UPDATE status_db SET 'Issued Status' = 'Issued Status' + 1 WHERE 'Book ID' = {book_id}")
+                    # for i in range(len(status_db["Book ID"])):
+                    #     if status_db["Book ID"][i] == book_id:
+                    #         status_db["Issued Status"].loc[i] += 1
                             
-                    # Save the changes
-                    student_db.to_csv(self.student_db, index=False)
-                    status_db.to_csv(self.status_db, index=False)
-                    os.system("cls" if os.name == "nt" else "clear")
                     print("Book assigned successfully!")
-                    print(tabulate(student_db, headers="keys", tablefmt="psql"))
-                    time.sleep(2)
+                    # print the last 5 rows of the student_db
+                    print(student_db.show())
+                    # Save the changes back to the csv files
+                    student_db.toPandas().to_csv(self.student_db, index=False)
+                    status_db.toPandas().to_csv(self.status_db, index=False)
+                    # Close spark session
+                    spark.stop()
+                    os.system("cls" if os.name == "nt" else "clear")
+                    # Print student table
+                    
+                    time.sleep(5)
                     self.run()
     
                 
@@ -145,12 +164,13 @@ class Books:
                         # Remove the book from the student_db
                         student_db.drop(student_db.index[student_db["Student ID"] == student_id], inplace=True)
                         # Update the status_db
-                        for i in range(len(status_db["Book ID"])):
-                            if status_db["Book ID"][i] == book_id:
-                                status_db["Issued Status"].loc[i] -= 1
+                        status_db = status_db.withColumn("Issued Status", status_db["Issued Status"] - 1)\
+                            .where(status_db["Book ID"] == book_id)
                         # Save the changes
                         student_db.to_csv(self.student_db, index=False)
-                        status_db.to_csv(self.status_db, index=False)
+                        status_db.toPandas().to_csv(self.status_db, index=False)
+                        # Close spark session
+                        spark.stop()
                         os.system("cls" if os.name == "nt" else "clear")
                         print("Book returned successfully!")
                         print(tabulate(student_db, headers="keys", tablefmt="psql"))
@@ -188,9 +208,9 @@ class Books:
                     f"We found a match for ‘{book_title}’ with {book} with an accuracy of {ratio}%."
                 )
                 choice = input("Is this the book you were looking for? (Y/N): ").lower()
-                while choice != "y" and choice != "n":
+                while choice != "y" and choice != "n" and choice != "":
                     choice = input("Invalid choice! Please try again: ").lower()
-                if choice == "y":
+                if choice == "y" or choice == "":
                     os.system("cls" if os.name == "nt" else "clear")
                     return book, author, year, book_id
                 else:
@@ -203,6 +223,7 @@ class Books:
         return None, None, None, None
 
     def run(self):
+        os.system("cls" if os.name == "nt" else "clear")
         print("Welcome to Library Operations!")
         print("Please select an option from the menu below: (Default is 1)")
         print("1. Search for a book")
@@ -223,9 +244,9 @@ class Books:
                 resume = input(
                     "Would you like to assign this book to a student? (Y/N): "
                 ).lower()
-                while resume != "y" and resume != "n":
+                while resume != "y" and resume != "n" and resume != "":
                     resume = input("Invalid choice! Please try again: ").lower()
-                if resume == "y":
+                if resume == "y" or resume == "":
                     print("Assigning book...")
                     time.sleep(2)
                     self.book_ops(book_id=book_id)
